@@ -174,3 +174,4 @@ cython_debug/
 .pypirc
 
 downloaded_papers
+download_state.json
