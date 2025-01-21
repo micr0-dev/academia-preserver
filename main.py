@@ -61,6 +61,14 @@ class AcademiaDownloader:
         results = self.search_papers(keyword, offset=0, size=1)
         return results.get("total", 0)
 
+    def count_total_papers_multiple(self, keywords):
+        """Count total available papers for multiple keywords"""
+        total = 0
+        for keyword in keywords:
+            results = self.search_papers(keyword.strip(), offset=0, size=1)
+            total += results.get("total", 0)
+        return total
+
     def format_filename(self, work, attachment, unique_id):
         authors = work.get("authors", [])
         author_names = []
@@ -117,42 +125,52 @@ async def main():
         )
     )
 
-    keyword = Prompt.ask(
-        "\n[yellow]Enter search keyword (or 'all' for everything)[/yellow]"
+    keywords_input = Prompt.ask(
+        "\n[yellow]Enter search keywords (comma-separated, or 'all' for everything)[/yellow]"
     )
+
+    if keywords_input.lower() == "all":
+        keywords = ["all"]
+    else:
+        keywords = [k.strip() for k in keywords_input.split(",") if k.strip()]
+
     output_dir = Prompt.ask(
         "[yellow]Enter output directory[/yellow]", default="downloaded_papers"
     )
 
     downloader = AcademiaDownloader()
 
-    # Get total available papers
     with console.status("[bold green]Counting total available papers..."):
-        total_available = downloader.count_total_papers(keyword)
-        console.print(f"[green]Found {total_available} papers in total[/green]")
+        if keywords[0].lower() == "all":
+            total_available = downloader.count_total_papers("all")
+            console.print(f"[green]Found {total_available} papers in total[/green]")
+        else:
+            keyword_counts = {}
+            total_available = 0
+            for keyword in keywords:
+                count = downloader.count_total_papers(keyword)
+                keyword_counts[keyword] = count
+                total_available += count
+                console.print(
+                    f"[green]Found {count} papers for keyword '{keyword}'[/green]"
+                )
+            console.print(
+                f"[bold green]Total papers across all keywords: {total_available}[/bold green]"
+            )
 
-    if keyword.lower() != "all":
-        max_papers_input = Prompt.ask(
-            "[yellow]Maximum number of papers to download (or 'all' for no limit)[/yellow]",
-            default="10",
-        )
-        max_papers = (
-            total_available
-            if max_papers_input.lower() == "all"
-            else int(max_papers_input)
-        )
-    else:
-        max_papers = total_available
+    max_papers_input = Prompt.ask(
+        "[yellow]Maximum number of papers to download (or 'all' for no limit)[/yellow]",
+        default="10",
+    )
+    max_papers = (
+        total_available if max_papers_input.lower() == "all" else int(max_papers_input)
+    )
 
     concurrent_downloads = int(
         Prompt.ask("[yellow]Number of concurrent downloads[/yellow]", default="3")
     )
 
     os.makedirs(output_dir, exist_ok=True)
-
-    offset = 0
-    downloaded = 0
-    download_tasks = []
 
     progress = Progress(
         SpinnerColumn(),
@@ -168,61 +186,91 @@ async def main():
         with progress:
             overall_task = progress.add_task("[cyan]Overall Progress", total=max_papers)
             current_file_task = None
+            downloaded = 0
 
-            while downloaded < max_papers:
-                try:
-                    results = downloader.search_papers(keyword, offset=offset)
-                    works = results.get("works", [])
-
-                    if not works:
-                        console.print("[red]No more papers found.[/red]")
-                        break
-
-                    for work in works:
-                        if downloaded >= max_papers:
-                            break
-
-                        attachments = work.get("downloadableAttachments", [])
-                        if attachments:
-                            for attachment in attachments:
-                                if downloaded >= max_papers:
-                                    break
-
-                                download_url = attachment.get("bulkDownloadUrl")
-                                if download_url:
-                                    unique_id = str(uuid.uuid4())[:8]
-                                    filename = downloader.format_filename(
-                                        work, attachment, unique_id
-                                    )
-
-                                    if current_file_task is not None:
-                                        progress.remove_task(current_file_task)
-
-                                    current_file_task = progress.add_task(
-                                        f"[blue]Downloading {filename[:20]}...",
-                                        total=100,
-                                    )
-
-                                    await downloader.download_paper_async(
-                                        session,
-                                        download_url,
-                                        filename,
-                                        output_dir,
-                                        progress,
-                                        current_file_task,
-                                    )
-
-                                    downloaded += 1
-                                    progress.update(overall_task, completed=downloaded)
-                                    time.sleep(0.5)  # Be nice to the server
-
-                    offset += len(works)
-
-                except Exception as e:
-                    console.print(f"[red]Error: {str(e)}[/red]")
+            for keyword in keywords:
+                if downloaded >= max_papers:
                     break
 
-            # Remove the last file task
+                offset = 0
+                keyword_task = progress.add_task(
+                    f"[yellow]Progress for '{keyword}'",
+                    total=(
+                        min(
+                            keyword_counts.get(keyword, max_papers),
+                            max_papers - downloaded,
+                        )
+                        if keywords[0].lower() != "all"
+                        else max_papers
+                    ),
+                )
+                keyword_downloaded = 0
+
+                while True:
+                    try:
+                        results = downloader.search_papers(keyword, offset=offset)
+                        works = results.get("works", [])
+
+                        if not works:
+                            break
+
+                        for work in works:
+                            if downloaded >= max_papers:
+                                break
+
+                            attachments = work.get("downloadableAttachments", [])
+                            if attachments:
+                                for attachment in attachments:
+                                    if downloaded >= max_papers:
+                                        break
+
+                                    download_url = attachment.get("bulkDownloadUrl")
+                                    if download_url:
+                                        unique_id = str(uuid.uuid4())[:8]
+                                        filename = downloader.format_filename(
+                                            work, attachment, unique_id
+                                        )
+
+                                        base, ext = os.path.splitext(filename)
+                                        filename = f"{base}__{keyword.strip()}{ext}"
+
+                                        if current_file_task is not None:
+                                            progress.remove_task(current_file_task)
+
+                                        current_file_task = progress.add_task(
+                                            f"[blue]Downloading {filename[:30]}",
+                                            total=100,
+                                        )
+
+                                        await downloader.download_paper_async(
+                                            session,
+                                            download_url,
+                                            filename,
+                                            output_dir,
+                                            progress,
+                                            current_file_task,
+                                        )
+
+                                        downloaded += 1
+                                        keyword_downloaded += 1
+                                        progress.update(
+                                            overall_task, completed=downloaded
+                                        )
+                                        progress.update(
+                                            keyword_task, completed=keyword_downloaded
+                                        )
+                                        time.sleep(0.5)  # Be nice to the server :)
+
+                        offset += len(works)
+
+                    except Exception as e:
+                        console.print(
+                            f"[red]Error with keyword '{keyword}': {str(e)}[/red]"
+                        )
+                        break
+
+                progress.remove_task(keyword_task)
+
             if current_file_task is not None:
                 progress.remove_task(current_file_task)
 
