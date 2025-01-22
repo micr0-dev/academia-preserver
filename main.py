@@ -126,46 +126,68 @@ class AcademiaDownloader:
         return total
 
     def format_filename(self, work, attachment, unique_id, keyword):
-        """Format filename and return both filename and paper_id"""
-        authors = work.get("authors", [])
-        author_names = []
-        for author in authors:
-            full_name = (
-                f"{author.get('firstName', '')} {author.get('lastName', '')}".strip()
-            )
-            if full_name:
-                author_names.append(full_name)
-
-        title = work.get("title", "Untitled")
+        MAX_FILENAME_LENGTH = 200
 
         def clean_string(s):
+            # Remove invalid characters and replace with underscore
             s = re.sub(r'[<>:"/\\|?*]', "_", s)
+            # Replace multiple spaces/underscores with single underscore
             s = re.sub(r"[\s_]+", "_", s)
+            # Remove non-ASCII characters
+            s = "".join(c for c in s if ord(c) < 128)
+            # Remove common words that don't add much value
+            s = re.sub(r"_?(the|and|or|in|on|at|to|for|of|with)_?", "_", s.lower())
             return s.strip("_")
-
-        author_part = "_".join(author_names) if author_names else "Unknown_Author"
-        author_part = clean_string(author_part)
-        title_part = clean_string(title)
-        extension = os.path.splitext(attachment.get("fileName", ""))[1]
 
         paper_id = f"{work.get('id', '')}-{attachment.get('id', '')}"
 
-        filename = f"{author_part}-{title_part}-{keyword}-{unique_id}{extension}"
+        extension = os.path.splitext(attachment.get("fileName", ""))[1] or ".pdf"
 
-        if len(filename) > 225:
-            max_title_length = (
-                200
-                - len(author_part)
-                - len(keyword)
-                - len(unique_id)
-                - len(extension)
-                - 4
+        try:
+            authors = work.get("authors", [])[:2]  # Only use first two authors
+            author_names = []
+            for author in authors:
+                last_name = author.get("lastName", "").strip()
+                if last_name:
+                    author_names.append(clean_string(last_name))
+
+            author_part = "_".join(author_names) if author_names else "Unknown"
+            author_part = author_part[:30]  # Limit author part length
+
+            # Clean and limit title
+            title_part = clean_string(work.get("title", "Untitled"))
+            title_part = title_part[:50]  # Limit title length
+
+            keyword_part = clean_string(keyword)
+            keyword_part = keyword_part[:20]  # Limit keyword length
+
+            components = [author_part, title_part, keyword_part, unique_id, extension]
+
+            filename = "-".join(c for c in components if c)
+
+            if len(filename) > MAX_FILENAME_LENGTH:
+                minimal_components = [
+                    author_part[:20] if author_part else "unknown",
+                    unique_id,
+                    keyword_part[:10],
+                    extension,
+                ]
+                filename = "-".join(c for c in minimal_components if c)
+
+                if len(filename) > MAX_FILENAME_LENGTH:
+                    filename = f"paper-{unique_id[:8]}{extension}"
+
+            if len(filename) > MAX_FILENAME_LENGTH:
+                raise ValueError(f"Filename still too long: {len(filename)} chars")
+
+            return filename, paper_id
+
+        except Exception as e:
+            console.print(
+                f"[yellow]Warning: Error creating filename: {str(e)}. Using fallback format.[/yellow]"
             )
-            if max_title_length > 0:
-                title_part = title_part[:max_title_length]
-            filename = f"{author_part}-{title_part}-{keyword}-{unique_id}{extension}"
-
-        return filename, paper_id
+            fallback = f"paper-{unique_id[:8]}{extension}"
+            return fallback, paper_id
 
     async def download_paper_async(
         self, session, download_url, filename, output_dir, progress, file_task
@@ -232,9 +254,17 @@ async def main():
             )
             if return_to_main.lower() == "yes":
                 # Continue with loaded state
-                keywords = [
-                    k for k in state.keywords if k not in state.keywords_completed
-                ]
+
+                if state.total_downloaded < state.max_papers:
+                    state.keywords_completed.clear()
+
+                if state.current_keyword:
+                    keywords = [state.current_keyword] + [
+                        k for k in state.keywords if k != state.current_keyword
+                    ]
+                else:
+                    keywords = state.keywords
+
                 output_dir = state.output_dir
                 max_papers = state.max_papers
                 total_available = state.total_available
@@ -420,7 +450,9 @@ async def main():
                             state.save()
                             break
 
-                    state.keywords_completed.add(keyword)
+                    if state.total_downloaded >= max_papers or not works:
+                        state.keywords_completed.add(keyword)
+                        state.save()
                     state.save()
                     progress.remove_task(keyword_task)
 
