@@ -270,6 +270,12 @@ async def main():
                 total_available = state.total_available
                 keyword_counts = state.keyword_counts
                 new_session = False
+
+                if state.total_downloaded >= state.max_papers:
+                    console.print(
+                        f"[green]Already downloaded maximum number of papers ({state.max_papers})\nPlease start a new session.[/green]"
+                    )
+                    return
             else:
                 state = DownloadState()  # Reset state if not continuing
         else:
