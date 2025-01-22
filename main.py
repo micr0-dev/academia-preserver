@@ -152,9 +152,9 @@ class AcademiaDownloader:
 
         filename = f"{author_part}-{title_part}-{keyword}-{unique_id}{extension}"
 
-        if len(filename) > 255:
+        if len(filename) > 225:
             max_title_length = (
-                240
+                200
                 - len(author_part)
                 - len(keyword)
                 - len(unique_id)
