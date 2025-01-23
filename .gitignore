@@ -175,3 +175,5 @@ cython_debug/
 
 downloaded_papers
 download_state.json
+downloaded_papers*/
+download_*/
