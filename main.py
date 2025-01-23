@@ -341,7 +341,7 @@ class NLMDownloader:
                         async with session.get(
                             ocr_url, headers=self.headers
                         ) as response:
-                            if response.status == 200:
+                            if response.status == 200 or response.status == 202:
                                 # Download text content
                                 try:
                                     content = await response.text(encoding="utf-8")
