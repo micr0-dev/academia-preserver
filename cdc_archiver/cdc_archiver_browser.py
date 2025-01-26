@@ -3,13 +3,14 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.chrome.options import Options
+import math
 import os
 import requests
 import subprocess
 import time
 
 keyword = ""
-page_size = 100
+page_size = 250
 
 # Target URL
 wayback_url = "http://localhost:8080/cdc-archive-KEYWORD/record/"
@@ -30,66 +31,73 @@ def main():
         parser.add_argument('--keyword', type=str, help='Keyword')
         args = parser.parse_args()
 
+        downloaded_documents = 0
+        archived_websites = 0
+
         keyword = args.keyword
         wayback_url = "http://localhost:8080/cdc-archive-KEYWORD/record/".replace('KEYWORD', keyword)
         
         print(f"Starting downloading archive for: {keyword}")
 
-        print(f"Get index: {query_url+keyword}")
+        print("Creating index of all entries.")
         driver.get(query_url+keyword+f"&rows={page_size}")
-        time.sleep(2)  # Wait for the initial page to fully load; adjust as necessary
-        
-        # Parse the HTML content using BeautifulSoup
+        time.sleep(1)  # Wait for the initial page to fully load; adjust as necessary
         soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        # Find all links with the class 'group'
+
+        # Find all entries
         all_links = []
-        pages = int(len(soup.find_all('li', class_='pagination-item')) / 2 - 2)  # the pagination exists two times and has last/next buttons
-        links = [a.get('href') for a in soup.find_all('a', class_='group') if a.get('href')]
+        entries   = int(soup.select_one('form + div strong').get_text())
+        pages     = math.ceil(entries / page_size)
+        links     = [a.get('href') for a in soup.find_all('a', class_='group') if a.get('href')]
+        
         all_links.extend(links)
 
         if pages > 1:
             for p in range(pages):
-                print(query_url+keyword+f"&rows={page_size}&start="+str((p+1)*page_size))
+                print(f"Still creating index. Results-Page {p+1} of {pages}.")
                 driver.get(query_url+keyword+f"&rows={page_size}&start="+str((p+1)*page_size))
                 driver.refresh()
-                time.sleep(2)
+                time.sleep(1)
                 
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 links = [a.get('href') for a in soup.find_all('a', class_='group') if a.get('href')]
+                
                 all_links.extend(links)
 
-        print("Archive index.")
-        driver.get(wayback_url+query_url+keyword)
-        driver.refresh()
-        time.sleep(5)
+        print(f"Found {len(all_links)} entries.")
 
         # Archive the content of each link
         for i, link in enumerate(all_links, start=1):
-            if link.split('.')[-1] in ['pdf', 'xlsx']:
-                file_url = base_url+'www_cdc_gov'+link.split('www.cdc.gov')[-1]
-                file_name = link.split('/')[-1]
-                response = requests.get(file_url, stream=True)
+
+            archive_url = base_url+'www_cdc_gov'+link.split('www.cdc.gov')[-1]
+
+            if link.split('.')[-1] in ['pdf', 'xlsx', 'docx', 'pptx', 'xls', 'doc', 'ppt', 'csv']:
+                file_name = archive_url.split('/')[-1]
+                print(f"Downloading file {file_name}.")
+                response = requests.get(archive_url, stream=True)
                     
                 if response.status_code == 200:
                     with open(keyword+'/files/'+file_name, 'wb') as pdf_file:
                         pdf_file.write(response.content)
-                    print(f"File successfully downloaded: {file_name}")
+                    print(f"File successfully downloaded.")
+                    downloaded_documents += 1
                 else:
-                    print(f"Failed to download file. Status code: {response.status_code}")
+                    print(f"Failed to download file: {response.status_code}")
+
             else:
-                archive_url = wayback_url+base_url+link
-                print(f"Archive link: {archive_url}")
+                print(f"Archiving link {archive_url}.")
 
                 driver.get(archive_url)
                 driver.refresh()
-                time.sleep(5)
+                time.sleep(2)
+                archived_websites += 1
     
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:
         driver.quit()
-        print("Finished. Check your freshly created archive :)")
+        print("Finished. Check your freshly created archive.")
+        print(f"Downloaded {downloaded_documents} documents, and archived {archived_websites} websites.")
 
 if __name__ == "__main__":
     main()
