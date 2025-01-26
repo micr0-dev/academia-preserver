@@ -87,7 +87,7 @@ def main():
             else:
                 print(f"Archiving link {archive_url}.")
 
-                driver.get(archive_url)
+                driver.get(wayback_url+archive_url)
                 driver.refresh()
                 time.sleep(2)
                 archived_websites += 1
