@@ -104,8 +104,7 @@ class NLMDownloader:
             document["url"].split("/")[-1]
             url      = requests.get(
                         document["url"],
-                        allow_redirects=True,
-                        timeout=10).url # grab redirect
+                        allow_redirects=True).url # grab redirect
 
             if url.split('-')[-1] not in ['pdf', 'bk', 'doc']:
                 progress.update(task_id, completed=100, total=100)
