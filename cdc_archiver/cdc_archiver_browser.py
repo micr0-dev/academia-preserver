@@ -41,7 +41,7 @@ def main():
 
         print("Creating index of all entries.")
         driver.get(query_url+keyword+f"&rows={page_size}")
-        time.sleep(1)  # Wait for the initial page to fully load; adjust as necessary
+        time.sleep(2)  # Wait for the initial page to fully load; adjust as necessary
         soup = BeautifulSoup(driver.page_source, 'html.parser')
 
         # Find all entries
@@ -57,7 +57,7 @@ def main():
                 print(f"Still creating index. Results-Page {p+1} of {pages}.")
                 driver.get(query_url+keyword+f"&rows={page_size}&start="+str((p+1)*page_size))
                 driver.refresh()
-                time.sleep(1)
+                time.sleep(2)
                 
                 soup = BeautifulSoup(driver.page_source, 'html.parser')
                 links = [a.get('href') for a in soup.find_all('a', class_='group') if a.get('href')]
@@ -65,6 +65,13 @@ def main():
                 all_links.extend(links)
 
         print(f"Found {len(all_links)} entries.")
+
+        # backup of all found links
+        print(f"Writing all URLs to text file.")
+        with open(keyword+'/urls.txt', 'w') as urls_file:
+            for link in all_links:
+                archive_url = base_url+'www_cdc_gov'+link.split('www.cdc.gov')[-1]
+                urls_file.write(archive_url + "\n")
 
         # Archive the content of each link
         for i, link in enumerate(all_links, start=1):
