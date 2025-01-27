@@ -1,4 +1,5 @@
 import asyncio
+import csv
 import glob
 import json
 import os
@@ -96,38 +97,20 @@ class NLMDownloader:
 
         return results
 
-    async def download_documents(self, document, output_dir, progress, task_id):
+    async def download_documents(self, ressource, output_dir, progress, task_id):
         """Download PDF"""
         try:
-            filename = self.format_filename(document)
+            filename = self.format_filename(ressource)
             pdf_path = os.path.join(output_dir, filename)
-            document["url"].split("/")[-1]
-            url      = requests.get(
-                        document["url"],
-                        allow_redirects=True).url # grab redirect
 
-            if url.split('-')[-1] not in ['pdf', 'bk', 'doc']:
+            if not ressource['pdf_url']:
                 progress.update(task_id, completed=100, total=100)
                 console.print(
                     f"[yellow]No downloadable documents for {filename}.[/yellow]"
                 )
                 return False
 
-            if url.split('-')[-1] == 'pdf':
-                pdf_url = url.replace("/catalog", "/pdfdownload")
-                url.replace("/catalog", "/txt")
-            
-            if url.split('-')[-1] == 'bk':
-                pdf_url = url.replace("/catalog", "/pdf")
-                url.replace("/catalog", "/txt")
-            
-            if url.split('-')[-1] == 'doc':
-                pdf_url = url.replace("/catalog", "/pdf")
-                url.replace("/catalog", "/ocr")
-            
-            url.replace("/catalog", "/dc")
-
-            self.driver.get(pdf_url)
+            self.driver.get(ressource['pdf_url'])
             time.sleep(1)
 
             # todo: this process could be repeated for the ocr txt and the metadata files
@@ -157,7 +140,7 @@ class NLMDownloader:
 
         except Exception as e:
             console.print(
-                f"[red]Error downloading PDF for {pdf_url}: {str(e)}[/red]"
+                f"[red]Error downloading PDF for {filename}: {str(e)}[/red]"
             )
             return False
 
@@ -194,9 +177,8 @@ class NLMDownloader:
 
         return len(index)
 
-    def format_filename(self, document):
-        """Format filename for NLM documents"""
-
+    def format_filename(self, ressource):
+        """Format filename for NLM ressources"""
         def clean_string(s):
             if not s:
                 return ""
@@ -207,14 +189,13 @@ class NLMDownloader:
             s = "".join(c for c in s if ord(c) < 128)
             return s.strip("_")
 
-
         # Get components
-        title = clean_string(document.get("title", ""))[:50]
-        authors = "_".join([clean_string(a)[:20] for a in document.get("authors", [])])[
+        title = clean_string(ressource["title"])[:50]
+        authors = "_".join([clean_string(a)[:20] for a in ressource["authors"]])[
             :50
         ]
-        date = document.get("date", "")
-        doc_id = document.get("identifier", "").split("/")[-1]
+        date = ressource["date"]
+        doc_id = ressource["id"].split("/")[-1]
 
         # Create filename
         components = [p for p in [authors, title, date, doc_id] if p]
@@ -302,21 +283,65 @@ async def download_from_nlm():
                 )
                 if not results["documents"]:
                     break
+                    
+                ressources = []
 
-                for doc in results["documents"]:
-                    if downloaded >= max_papers:
+                for i, document in enumerate(results["documents"]):
+                    if i >= max_papers:
                         break
 
+                    console.print(f"Creating index entry for {document['url']}")
+
+                    title   = document.get("title", "")
+                    authors = document.get("authors", [])
+                    date   = document.get("date", "")
+                    doc_id = document.get("identifier", "").split("/")[-1]
+
+                    url    = requests.get(document["url"], allow_redirects=True).url # grab redirect
+
+                    pdf_url = txt_url = metadata_url = ''
+
+                    if url.split('-')[-1] == 'pdf':
+                        pdf_url = url.replace("/catalog", "/pdfdownload")
+                        txt_url = url.replace("/catalog", "/txt")
+                    
+                    if url.split('-')[-1] == 'bk':
+                        pdf_url = url.replace("/catalog", "/pdf")
+                        txt_url = url.replace("/catalog", "/txt")
+                    
+                    if url.split('-')[-1] == 'doc':
+                        pdf_url = url.replace("/catalog", "/pdf")
+                        txt_url = url.replace("/catalog", "/ocr")
+                    
+                    metadata_url = url.replace("/catalog", "/dc")
+
+                    ressources.append({
+                        'title': title,
+                        'authors': authors,
+                        'date': date,
+                        'id': doc_id,
+                        'ressource_url': document["url"],
+                        'pdf_url': pdf_url,
+                        'txt_url': txt_url,
+                        'metadata_url': metadata_url
+                    })
+                
+                console.print(f"Writing URLs to download to csv file.")
+
+                with open(output_dir+'/urls.csv', 'w', newline='') as file:
+                    fieldnames = ['title', 'authors', 'date', 'id', 'ressource_url', 'pdf_url', 'txt_url', 'metadata_url']
+                    writer = csv.DictWriter(file, fieldnames=fieldnames)
+                    
+                    writer.writeheader()
+                    writer.writerows(ressources)
+
+                for ressource in ressources:
                     file_task = progress.add_task(
-                        f"[blue]Downloading documents for {doc['title'][:50]}...", total=100
+                        f"[blue]Downloading documents for {ressource['title'][:50]}...", total=100
                     )
 
-                    # success_ocr = await downloader.download_ocr_text(
-                    #     doc, output_dir, progress, file_task
-                    # )
-
                     success_pdf = await downloader.download_documents(
-                        doc, output_dir, progress, file_task
+                        ressource, output_dir, progress, file_task
                     )
 
                     if success_pdf:
