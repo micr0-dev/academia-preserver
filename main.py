@@ -341,7 +341,7 @@ class NLMDownloader:
                         async with session.get(
                             ocr_url, headers=self.headers
                         ) as response:
-                            if response.status == 200 or response.status == 202:
+                            if response.status == 200:
                                 # Download text content
                                 try:
                                     content = await response.text(encoding="utf-8")
@@ -375,6 +375,8 @@ class NLMDownloader:
                                         json.dump(
                                             metadata, f, indent=2, ensure_ascii=False
                                         )
+
+                                print(ocr_url)
 
                                 progress.update(task_id, completed=100, total=100)
                                 await asyncio.sleep(self.rate_limit_delay)
